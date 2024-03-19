@@ -13,7 +13,8 @@ int admin_type;
 //Sentido actual del puente
 int current_way; 
 //Sentido real del puente
-int actual_way; 
+int actual_way = 0; 
+pthread_mutex_t actual_way_mutex = PTHREAD_MUTEX_INITIALIZER; //Mutex para proteger el actual_way
 
 //Lados del puente
 BridgeSide west_side;
@@ -23,10 +24,18 @@ BridgeSide east_side;
 pthread_mutex_t bridge[MAX_SIZE];
 int bridgeLength = 4;
 
+//Contador para determinar la cantidad de carros en el puente
+int cars_crossing = 0;
+pthread_mutex_t cars_crossing_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex para proteger cars_crossing
+
+pthread_cond_t enter_bridge_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t enter_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
 //Setear los parámetros que se dan en la entrada para cada lado del puente
 void initializeBridgeSide() {
     //Parámetros del lado oeste del puente (en realidad se deben leer de consola)
-    double west_exp_mean = 2;
+    double west_exp_mean = 3;
     double west_spead_mean = 50;
     double west_min_speed = 40;
     double west_max_speed = 60; 
@@ -81,6 +90,23 @@ void* creationSleep(void* mean) {
     return NULL;
 }
 
+void addCarsCrossing(){
+    pthread_mutex_lock(&cars_crossing_mutex);
+        cars_crossing++;
+    pthread_mutex_unlock(&cars_crossing_mutex);
+}
+
+
+//Funcion para determinar que un carro salio del puente
+void carExiting(){
+    pthread_mutex_lock(&cars_crossing_mutex);
+    cars_crossing--;
+    pthread_mutex_unlock(&cars_crossing_mutex);
+   // Desbloquear hilos si no hay más carros cruzando
+    if (cars_crossing == 0) {
+        pthread_cond_broadcast(&enter_bridge_cond);
+    }
+}
 
 //Función para que los carros del este pasen
 void* travelEastToWest(void* arg){
@@ -89,39 +115,20 @@ void* travelEastToWest(void* arg){
     struct timespec delay = {sleep_time, 0};
     int i;
     pthread_mutex_lock(&bridge[bridgeLength-1]); //Hace lock de la primera posición de este a oeste (la última)
-    printf("<- Carro %ld entró al puente \n",pthread_self());
+    printf("\033[35;1m<-\033[0m Carro %ld entró al puente \n",pthread_self());
     for(i = bridgeLength-2; i >= 0; i--){
-        printf("<- Carro %ld está cruzando sección %d \n", pthread_self(), i+1); //La posición de la que ya tiene el lock
+        printf("\033[35;1m<-\033[0m Carro %ld está cruzando sección %d \n", pthread_self(), i+1); //La posición de la que ya tiene el lock
         nanosleep(&delay, NULL);
         pthread_mutex_lock(&bridge[i]); //i es la siguiente posición
         pthread_mutex_unlock(&bridge[i+1]); //Hasta que se tiene la siguiente posición se libera la anterior
     }
-    printf("<- Carro %ld está cruzando sección 0 \n", pthread_self());
+    printf("\033[35;1m<-\033[0m Carro %ld está cruzando sección 0 \n", pthread_self());
     pthread_mutex_unlock(&bridge[0]);
-    printf("<- Carro %ld salió del puente \n",pthread_self());
-    pthread_exit(NULL);
+    printf("\033[35;1m<-\033[0m Carro %ld salió del puente \n",pthread_self());
+    
+    carExiting();
 }
 
-//Creación de los vehículos en el lado este
-void* createEastVehicles(void* size) {
-    int east_max_size = *((int*) size);
-    int i;
-    // Inicializar los vehículos y crear los hilos
-    for (i = 0; i < east_max_size; i++) {   
-        east_side.vehicles[i].priority = generatePriority();
-        east_side.vehicles[i].speed = 50 + i; // Ejemplo, hay que arreglarlo
-        pthread_create(&east_side.threads[i], NULL, travelEastToWest, (void*)&east_side.vehicles[i]);
-        pthread_mutex_lock(&east_side.size_mutex);
-        east_side.size++;
-        pthread_mutex_unlock(&east_side.size_mutex);
-        //Tiempo de espera
-        creationSleep(&east_side.exp_mean);
-    }
-    for (i = 0; i < MAX_SIZE; i++) {
-        pthread_join(east_side.threads[i], NULL);
-    }
-    return NULL;
-}
 
 //Función para que los carros del oeste pasen el puente
 void* travelWestToEast(void* arg){
@@ -130,59 +137,105 @@ void* travelWestToEast(void* arg){
     struct timespec delay = {sleep_time, 0};
     int i;
     pthread_mutex_lock(&bridge[0]); //Hace lock de la primera posición de oeste a este 
-    printf("-> Carro %ld entró al puente \n",pthread_self());
+    printf("\033[36;1m->\033[0m Carro %ld entró al puente \n",pthread_self());
     for(i = 1; i < bridgeLength; i++){
-        printf("-> Carro %ld está cruzando sección %d \n", pthread_self(), i-1); //Imprime la posición de la que se tiene lock actualmente
+        printf("\033[36;1m->\033[0m Carro %ld está cruzando sección %d \n", pthread_self(), i-1); //Posición de la que se tiene lock actualmente
         nanosleep(&delay, NULL);
         pthread_mutex_lock(&bridge[i]); //Se intenta hacer lock de la siguiente posición
         pthread_mutex_unlock(&bridge[i-1]); //Se libera la anterior
     }
-    printf("-> Carro %ld está cruzando sección %d \n", pthread_self(), bridgeLength-1);
+    printf("\033[36;1m->\033[0m Carro %ld está cruzando sección %d \n", pthread_self(), bridgeLength-1);
     pthread_mutex_unlock(&bridge[bridgeLength-1]);
-    printf("-> Carro %ld salió del puente \n",pthread_self());
+    printf("\033[36;1m->\033[0m Carro %ld salió del puente \n",pthread_self());
+    carExiting(); //hay un vehículo menos
+}
+
+//Función para determinar que un carro entro al puente o no
+void* carEntering(void* arg) {
+    Vehicle* vehicle = (Vehicle*) arg;
+    pthread_mutex_lock(&enter_bridge_mutex); //Bloquear el acceso a la variable de condición para entrar al puente
+    //El thread entra hasta que no haya carros en el puente o estén yendo en la misma dirección
+    while (cars_crossing != 0 && actual_way != vehicle->way) {
+        pthread_cond_wait(&enter_bridge_cond, &enter_bridge_mutex); //Esperar en la variable de condición
+    }
+    //Puede entrar
+    addCarsCrossing(); //Un vehículo más en el puente
+    if(actual_way != vehicle->way) { //Actualiza el sentido del puente en caso de ser necesario
+        pthread_mutex_lock(&actual_way_mutex);
+        actual_way = vehicle->way;
+        pthread_mutex_unlock(&actual_way_mutex);
+    }
+    pthread_mutex_unlock(&enter_bridge_mutex); // Desbloquea el mutex antes de salir de la función
+    //Pasar el puente en la dirección que corresponda
+    if(actual_way == 1) travelWestToEast(vehicle);
+    else travelEastToWest(vehicle);
     pthread_exit(NULL);
+}
+
+
+//Creación de los vehículos en el lado este
+void* createEastVehicles(void* size) {
+    int east_max_cars = *((int*) size);
+    int i;
+    // Inicializar los vehículos y crear los hilos
+    for (i = 0; i < east_max_cars; i++) {   
+        east_side.vehicles[i].way = 2;
+        east_side.vehicles[i].priority = generatePriority();
+        east_side.vehicles[i].speed = 50 + i; // Ejemplo, hay que arreglarlo
+        pthread_create(&east_side.threads[i], NULL, carEntering, &east_side.vehicles[i]);
+        pthread_mutex_lock(&east_side.size_mutex);
+        east_side.size++;
+        pthread_mutex_unlock(&east_side.size_mutex);
+        //Tiempo de espera
+        creationSleep(&east_side.exp_mean);
+    }
+    for (i = 0; i < east_max_cars; i++) {
+        pthread_join(east_side.threads[i], NULL);
+    }
+    return NULL;
 }
 
 
 //Creación de los vehículos en el lado oeste
 void* createWestVehicles(void* size) {
-    int west_max_size = *((int*) size);
+    int west_max_cars = *((int*) size);
     int i;
     // Inicializar los vehículos y crear los hilos
-    for (i = 0; i < west_max_size; i++) {   
+    for (i = 0; i < west_max_cars; i++) {   
+        west_side.vehicles[i].way = 1;
         west_side.vehicles[i].priority = generatePriority();
         west_side.vehicles[i].speed = 50 + i; // Ejemplo, hay que arreglarlo
-        pthread_create(&west_side.threads[i], NULL, travelWestToEast, &west_side.vehicles[i]);
+        pthread_create(&west_side.threads[i], NULL, carEntering, &west_side.vehicles[i]);
         pthread_mutex_lock(&west_side.size_mutex);
         west_side.size++;
         pthread_mutex_unlock(&west_side.size_mutex);
         //Tiempo de espera
         creationSleep(&west_side.exp_mean);
     }
-    for (i = 0; i < MAX_SIZE; i++) {
+    for (i = 0; i < west_max_cars; i++) {
         pthread_join(west_side.threads[i], NULL);
     }
     return NULL;
 }
 
 
+
 int main() {
     srand(time(NULL)); //Plantar la semilla para generar números aleatorios
-    int west_max_cars = 3;
+    int west_max_cars = 2;
     int east_max_cars = 2;
     //Setear los parámetros de cada lado del puente
     initializeBridgeSide();
     //Inicializar el puente
     initializeBridge(bridgeLength);
     //Threads para generar vehículos
-    //pthread_t generate_west;
+    pthread_t generate_west;
     pthread_t generate_east;
-    //pthread_create(&generate_west, NULL, createWestVehicles, &west_max_cars);
+    pthread_create(&generate_west, NULL, createWestVehicles, &west_max_cars);
     pthread_create(&generate_east, NULL, createEastVehicles, &east_max_cars);
-    //pthread_join(generate_west, NULL);
+    pthread_join(generate_west, NULL);
     pthread_join(generate_east, NULL);
-    //printf("West vehicles: %d\n", west_side.size);
-    printf("East vehicles: %d\n", east_side.size);
+    printf("Fin \n");
     return 0;
 }
 
