@@ -7,6 +7,8 @@
 #include "bridgeSide.h" 
 
 #define MAX_SIZE 100
+#define K_CONST 50
+#define VEHICLE_TYPE (vehicle->priority==1 ? "\033[31;1mAmbulancia\033[0m" : "Carro") //Para poder imprimir si soy ambulancia o carro en terminal
 
 //Modo de administrar el puente
 int admin_type;
@@ -111,20 +113,20 @@ void carExiting(){
 //Función para que los carros del este pasen
 void* travelEastToWest(void* arg){
     Vehicle* vehicle = (Vehicle*)arg;
-    double sleep_time = 50/(vehicle->speed);
+    double sleep_time = K_CONST/(vehicle->speed);
     struct timespec delay = {sleep_time, 0};
     int i;
     pthread_mutex_lock(&bridge[bridgeLength-1]); //Hace lock de la primera posición de este a oeste (la última)
-    printf("\033[35;1m<-\033[0m Carro %ld entró al puente \n",pthread_self());
+    printf("\033[35;1m<-\033[0m %s %ld entró al puente \n", VEHICLE_TYPE,pthread_self());
     for(i = bridgeLength-2; i >= 0; i--){
-        printf("\033[35;1m<-\033[0m Carro %ld está cruzando sección %d \n", pthread_self(), i+1); //La posición de la que ya tiene el lock
+        printf("\033[35;1m<-\033[0m %s %ld está cruzando sección %d \n", VEHICLE_TYPE,pthread_self(), i+1); //La posición de la que ya tiene el lock
         nanosleep(&delay, NULL);
         pthread_mutex_lock(&bridge[i]); //i es la siguiente posición
         pthread_mutex_unlock(&bridge[i+1]); //Hasta que se tiene la siguiente posición se libera la anterior
     }
-    printf("\033[35;1m<-\033[0m Carro %ld está cruzando sección 0 \n", pthread_self());
+    printf("\033[35;1m<-\033[0m %s %ld está cruzando sección 0 \n", VEHICLE_TYPE,pthread_self());
     pthread_mutex_unlock(&bridge[0]);
-    printf("\033[35;1m<-\033[0m Carro %ld salió del puente \n",pthread_self());
+    printf("\033[35;1m<-\033[0m %s %ld salió del puente \n",VEHICLE_TYPE, pthread_self());
     
     carExiting();
 }
@@ -133,40 +135,49 @@ void* travelEastToWest(void* arg){
 //Función para que los carros del oeste pasen el puente
 void* travelWestToEast(void* arg){
     Vehicle* vehicle = (Vehicle*)arg;
-    double sleep_time = 50/(vehicle->speed);
+    double sleep_time = K_CONST/(vehicle->speed);
     struct timespec delay = {sleep_time, 0};
     int i;
     pthread_mutex_lock(&bridge[0]); //Hace lock de la primera posición de oeste a este 
-    printf("\033[36;1m->\033[0m Carro %ld entró al puente \n",pthread_self());
+    printf("\033[36;1m->\033[0m %s %ld entró al puente \n",VEHICLE_TYPE ,pthread_self());
     for(i = 1; i < bridgeLength; i++){
-        printf("\033[36;1m->\033[0m Carro %ld está cruzando sección %d \n", pthread_self(), i-1); //Posición de la que se tiene lock actualmente
+        printf("\033[36;1m->\033[0m %s %ld está cruzando sección %d \n",VEHICLE_TYPE ,pthread_self(), i-1); //Posición de la que se tiene lock actualmente
         nanosleep(&delay, NULL);
         pthread_mutex_lock(&bridge[i]); //Se intenta hacer lock de la siguiente posición
         pthread_mutex_unlock(&bridge[i-1]); //Se libera la anterior
     }
-    printf("\033[36;1m->\033[0m Carro %ld está cruzando sección %d \n", pthread_self(), bridgeLength-1);
+    printf("\033[36;1m->\033[0m %s %ld está cruzando sección %d \n",VEHICLE_TYPE, pthread_self(), bridgeLength-1);
     pthread_mutex_unlock(&bridge[bridgeLength-1]);
-    printf("\033[36;1m->\033[0m Carro %ld salió del puente \n",pthread_self());
+    printf("\033[36;1m->\033[0m %s %ld salió del puente \n", VEHICLE_TYPE,pthread_self());
     carExiting(); //hay un vehículo menos
 }
 
 //Función para determinar que un carro entro al puente o no
 void* carEntering(void* arg) {
     Vehicle* vehicle = (Vehicle*) arg;
+    int ambulance_is_waiting=0; //Variable para determinar si hay una ambulancia esperando en cualquier lado
     pthread_mutex_lock(&enter_bridge_mutex); //Bloquear el acceso a la variable de condición para entrar al puente
-    //El thread entra hasta que no haya carros en el puente o estén yendo en la misma dirección
-    while (cars_crossing != 0 && actual_way != vehicle->way) {
+    //El thread entra al puente hasta que no haya vehiculos en el puente o estén yendo en la misma dirección o no haya 
+    //ambulancias esperando en el lado opuesto si este no es ambulancia
+    while (cars_crossing != 0 && actual_way != vehicle->way || vehicle->priority!=1 && ambulance_is_waiting) {
+        if(vehicle->priority==1){
+            ambulance_is_waiting = 1; //Si soy ambulancia marco que estoy esperando 
+        }
         pthread_cond_wait(&enter_bridge_cond, &enter_bridge_mutex); //Esperar en la variable de condición
     }
     //Puede entrar
     addCarsCrossing(); //Un vehículo más en el puente
-    if(actual_way != vehicle->way) { //Actualiza el sentido del puente en caso de ser necesario
+    if(actual_way != vehicle->way || vehicle->priority==1) { //Actualiza el sentido del puente en caso de ser necesario
         pthread_mutex_lock(&actual_way_mutex);
         actual_way = vehicle->way;
         pthread_mutex_unlock(&actual_way_mutex);
     }
+    if(vehicle->priority==1){ 
+        ambulance_is_waiting=0;
+        pthread_cond_broadcast(&enter_bridge_cond);  //Despierta a los hilos que estaban esperando
+    }
     pthread_mutex_unlock(&enter_bridge_mutex); // Desbloquea el mutex antes de salir de la función
-    //Pasar el puente en la dirección que corresponda
+    //Pasar el puente en la dirección que corresponda 
     if(actual_way == 1) travelWestToEast(vehicle);
     else travelEastToWest(vehicle);
     pthread_exit(NULL);
