@@ -21,6 +21,9 @@ pthread_mutex_t actual_way_mutex = PTHREAD_MUTEX_INITIALIZER; //Mutex para prote
 //Lados del puente
 BridgeSide west_side;
 BridgeSide east_side;
+//Cantidad de carros por cada lado
+int west_max_cars = 2;
+int east_max_cars = 2;
 
 //Puente
 pthread_mutex_t bridge[MAX_SIZE];
@@ -37,26 +40,30 @@ pthread_mutex_t enter_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
 //Setear los parámetros que se dan en la entrada para cada lado del puente
 void initializeBridgeSide() {
     //Parámetros del lado oeste del puente (en realidad se deben leer de consola)
-    double west_exp_mean = 3;
-    double west_spead_mean = 50;
+    double west_exp_mean = 2;
+    double west_speed_mean = 50;
     double west_min_speed = 40;
     double west_max_speed = 60; 
     west_side.size = 0;
+    west_side.max_cars = west_max_cars;
     west_side.exp_mean = west_exp_mean;
-    west_side.speed_mean = west_spead_mean;
+    west_side.speed_mean = west_speed_mean;
     west_side.min_speed = west_min_speed;
     west_side.max_speed = west_max_speed;
+    west_side.total_speed = west_speed_mean*west_max_cars;
     pthread_mutex_init(&(west_side.size_mutex), NULL);
     //Parámetros del lado este del puente
     double east_exp_mean = 2;
-    double east_spead_mean = 50;
+    double east_speed_mean = 50;
     double east_min_speed = 40;  
     double east_max_speed = 60; 
     east_side.size = 0;
+    east_side.max_cars = east_max_cars;
     east_side.exp_mean = east_exp_mean;
-    east_side.speed_mean = east_spead_mean;
+    east_side.speed_mean = east_speed_mean;
     east_side.min_speed = east_min_speed;
     east_side.max_speed = east_max_speed;
+    east_side.total_speed = east_speed_mean*east_max_cars;
     pthread_mutex_init(&(east_side.size_mutex), NULL);
 }
 
@@ -69,11 +76,6 @@ void initializeBridge(int size){
     }
 }
 
-/*void* printThread(void* arg) {
-    Vehicle* vehicle = (Vehicle*)arg;
-    printf("Thread %ld executing with priority %d and speed %d\n", pthread_self(), vehicle->priority, vehicle->speed);
-    pthread_exit(NULL);
-}*/
 
 //Retorna 2 si el vehículo es carro y 1 si es ambulancia, es mucho más probable que sea carro
 int generatePriority() {
@@ -184,15 +186,40 @@ void* carEntering(void* arg) {
 }
 
 
+double generateSpeed(int i, BridgeSide* side) {  
+    //Generar un double random en el intervalo deseado
+    double random_speed = ((double)rand()/RAND_MAX)*(side->max_speed-side->min_speed) + side->min_speed;
+    if (i < side->max_cars-1) {
+        //El valor más grande que le puede quedar a total_speed (si los vehículos que quedan tienen la mínima velocidad)
+        double max_total_speed = side->total_speed - (side->max_cars - (i+1)) * side->min_speed;
+        //El valor más pequeño que le puede quedar a total_speed (si los vehículos que quedan tienen la máxima velocidad)
+        double min_total_speed = side->total_speed - (side->max_cars - (i+1)) * side->max_speed;
+        //Si la velocidad generada está fuera del rango [min_total_speed, max_total_speed], se debe ajustar para que la 
+        //suma de las velocidades que se están asignando sea max_cars*speed_mean
+        if (random_speed < min_total_speed) random_speed = min_total_speed; 
+        else if (random_speed > max_total_speed) random_speed = max_total_speed;
+    }
+    else random_speed = side->total_speed; //Al último carro se le asigna lo que queda
+    side->total_speed -= random_speed;
+    return random_speed;
+}
+
+void* printThread(void* arg) {
+    Vehicle* vehicle = (Vehicle*)arg;
+    printf("Vehicle %ld executing with priority %d and speed %f\n", pthread_self(), vehicle->priority, vehicle->speed);
+    pthread_exit(NULL);
+}
+
 //Creación de los vehículos en el lado este
 void* createEastVehicles(void* size) {
     int east_max_cars = *((int*) size);
+    double total_speed = east_max_cars * east_side.speed_mean; //Suma de las velocidades para tener la media indicada
     int i;
     // Inicializar los vehículos y crear los hilos
     for (i = 0; i < east_max_cars; i++) {   
         east_side.vehicles[i].way = 2;
         east_side.vehicles[i].priority = generatePriority();
-        east_side.vehicles[i].speed = 50 + i; // Ejemplo, hay que arreglarlo
+        east_side.vehicles[i].speed = generateSpeed(i, &east_side);
         pthread_create(&east_side.threads[i], NULL, carEntering, &east_side.vehicles[i]);
         pthread_mutex_lock(&east_side.size_mutex);
         east_side.size++;
@@ -215,7 +242,7 @@ void* createWestVehicles(void* size) {
     for (i = 0; i < west_max_cars; i++) {   
         west_side.vehicles[i].way = 1;
         west_side.vehicles[i].priority = generatePriority();
-        west_side.vehicles[i].speed = 50 + i; // Ejemplo, hay que arreglarlo
+        west_side.vehicles[i].speed = generateSpeed(i, &west_side);
         pthread_create(&west_side.threads[i], NULL, carEntering, &west_side.vehicles[i]);
         pthread_mutex_lock(&west_side.size_mutex);
         west_side.size++;
@@ -233,8 +260,6 @@ void* createWestVehicles(void* size) {
 
 int main() {
     srand(time(NULL)); //Plantar la semilla para generar números aleatorios
-    int west_max_cars = 2;
-    int east_max_cars = 2;
     //Setear los parámetros de cada lado del puente
     initializeBridgeSide();
     //Inicializar el puente
@@ -246,7 +271,8 @@ int main() {
     pthread_create(&generate_east, NULL, createEastVehicles, &east_max_cars);
     pthread_join(generate_west, NULL);
     pthread_join(generate_east, NULL);
-    printf("Fin \n");
+    printf("East total vehicles: %d\n", east_side.size);
+    printf("East total vehicles: %d\n", west_side.size);
     return 0;
 }
 
