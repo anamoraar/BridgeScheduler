@@ -22,12 +22,11 @@ pthread_mutex_t actual_way_mutex = PTHREAD_MUTEX_INITIALIZER; //Mutex para prote
 BridgeSide west_side;
 BridgeSide east_side;
 //Cantidad de carros por cada lado
-int west_max_cars = 2;
-int east_max_cars = 2;
+int west_max_cars, east_max_cars;
 
 //Puente
 pthread_mutex_t bridge[MAX_SIZE];
-int bridgeLength = 4;
+int bridgeLength;
 
 //Contador para determinar la cantidad de carros en el puente
 int cars_crossing = 0;
@@ -35,46 +34,6 @@ pthread_mutex_t cars_crossing_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex para p
 
 pthread_cond_t enter_bridge_cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t enter_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-
-//Setear los parámetros que se dan en la entrada para cada lado del puente
-void initializeBridgeSide() {
-    //Parámetros del lado oeste del puente (en realidad se deben leer de consola)
-    double west_exp_mean = 2;
-    double west_speed_mean = 50;
-    double west_min_speed = 40;
-    double west_max_speed = 60; 
-    west_side.size = 0;
-    west_side.max_cars = west_max_cars;
-    west_side.exp_mean = west_exp_mean;
-    west_side.speed_mean = west_speed_mean;
-    west_side.min_speed = west_min_speed;
-    west_side.max_speed = west_max_speed;
-    west_side.total_speed = west_speed_mean*west_max_cars;
-    pthread_mutex_init(&(west_side.size_mutex), NULL);
-    //Parámetros del lado este del puente
-    double east_exp_mean = 2;
-    double east_speed_mean = 50;
-    double east_min_speed = 40;  
-    double east_max_speed = 60; 
-    east_side.size = 0;
-    east_side.max_cars = east_max_cars;
-    east_side.exp_mean = east_exp_mean;
-    east_side.speed_mean = east_speed_mean;
-    east_side.min_speed = east_min_speed;
-    east_side.max_speed = east_max_speed;
-    east_side.total_speed = east_speed_mean*east_max_cars;
-    pthread_mutex_init(&(east_side.size_mutex), NULL);
-}
-
-
-//Inicializar los mutex del puente
-void initializeBridge(int size){
-    int i;
-    for(i = 0; i<size; i++){
-        pthread_mutex_init(&bridge[i], NULL);
-    }
-}
 
 
 //Retorna 2 si el vehículo es carro y 1 si es ambulancia, es mucho más probable que sea carro
@@ -256,12 +215,53 @@ void* createWestVehicles(void* size) {
     return NULL;
 }
 
+//Inicializar los mutex del puente
+void initializeBridge(int size){
+    int i;
+    for(i = 0; i<size; i++){
+        pthread_mutex_init(&bridge[i], NULL);
+    }
+}
+
+
+/*Leer los valores necesarios para la simulación:
+bridgeLength
+west_max_cars west_exp_mean west_min_speed west_max_speed west_speed_mean
+east_max_cars east_exp_mean east_min_speed east_max_speed east_speed_mean
+*/
+void readAndSetParameters() {
+    scanf("%d", &bridgeLength);
+    //Lado oeste del puente
+    double west_exp_mean, west_min_speed, west_max_speed, west_speed_mean;
+    scanf("%d %lf %lf %lf %lf", &west_max_cars, &west_exp_mean, &west_min_speed, &west_max_speed, &west_speed_mean);
+    west_side.size = 0;
+    west_side.max_cars = west_max_cars;
+    west_side.exp_mean = west_exp_mean;
+    west_side.min_speed = west_min_speed;
+    west_side.max_speed = west_max_speed;
+    west_side.speed_mean = west_speed_mean;
+    west_side.total_speed = west_speed_mean*west_max_cars;
+    pthread_mutex_init(&(west_side.size_mutex), NULL);
+    //Lado este
+    double east_exp_mean, east_min_speed, east_max_speed, east_speed_mean;
+    scanf("%d %lf %lf %lf %lf", &east_max_cars, &east_exp_mean, &east_min_speed, &east_max_speed, &east_speed_mean);
+    east_side.size = 0;
+    east_side.max_cars = east_max_cars;
+    east_side.exp_mean = east_exp_mean;
+    east_side.speed_mean = east_speed_mean;
+    east_side.min_speed = east_min_speed;
+    east_side.max_speed = east_max_speed;
+    east_side.total_speed = east_speed_mean*east_max_cars;
+    pthread_mutex_init(&(east_side.size_mutex), NULL);
+    
+}
+
 
 
 int main() {
     srand(time(NULL)); //Plantar la semilla para generar números aleatorios
     //Setear los parámetros de cada lado del puente
-    initializeBridgeSide();
+    readAndSetParameters();
     //Inicializar el puente
     initializeBridge(bridgeLength);
     //Threads para generar vehículos
