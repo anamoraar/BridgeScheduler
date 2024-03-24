@@ -161,9 +161,9 @@ void* carEntering(void* arg) {
     pthread_mutex_lock(&enter_bridge_mutex); //Bloquear el acceso a la variable de condición para entrar al puente
     //El thread entra al puente hasta que no haya vehiculos en el puente o estén yendo en la misma dirección o no haya 
     //ambulancias esperando en el lado opuesto si este no es ambulancia o si el semaforo de mi lado esta en rojo
-    while (vehicle->way==1 && west_semaphore.light==0 || vehicle->way==2 && east_semaphore.light==0 || cars_crossing != 0 && actual_way != vehicle->way || vehicle->priority!=1 && ambulance_is_waiting) {
+    while (vehicle->way==1 && vehicle->priority !=1 && west_semaphore.light==0 || vehicle->way==2 && vehicle->priority !=1 && east_semaphore.light==0 || cars_crossing != 0 && actual_way != vehicle->way || vehicle->priority!=1 && ambulance_is_waiting) {
         if(vehicle->priority==1){
-            ambulance_is_waiting = 1; //Si soy ambulancia marco que estoy esperando 
+            ambulance_is_waiting=1; //Si soy ambulancia marco que estoy esperando 
         }
         pthread_cond_wait(&enter_bridge_cond, &enter_bridge_mutex); //Esperar en la variable de condición
     }
@@ -351,8 +351,8 @@ int main() {
     pthread_join(generate_west, NULL);
     pthread_join(generate_east, NULL);
     pthread_join(semaphores,NULL);
-    printf("East total vehicles: %d\n", east_side.size);
     printf("East total vehicles: %d\n", west_side.size);
+    printf("West total vehicles: %d\n", east_side.size);
     return 0;
 
 }
