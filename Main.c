@@ -129,8 +129,8 @@ void carExiting(){
         pthread_cond_broadcast(&enter_bridge_cond);
     }
     //Estado actual: sentido del puente, k_counter y cantidad de carros en lado oeste y este
-    if(admin_mode == 3) printf("\033[33;1mWAY: %d, \033[36;1m(WKCount: %d, WCurrentCars: %d), \033[35;1m(EKCount: %d, ECurrentCars: %d)\033[0m\n\n", 
-    current_way, west_officer.k_counter, west_side.current_cars, east_officer.k_counter, east_side.current_cars);
+    if(admin_mode != 2) printf("\033[36;1mVehículos esperando en oeste: %d, \033[35;1mVehículos esperando en este: %d\033[0m\n\n", 
+    west_side.current_cars, east_side.current_cars);
     
 }
 
