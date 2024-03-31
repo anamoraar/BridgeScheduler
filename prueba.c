@@ -57,7 +57,7 @@ pthread_mutex_t enter_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
 //Variable para establecer el sentido del puente según quién llega primero en el modo oficiales de tránsito
 int arrived_first = 0;
 
-//Función para que los oficiales dejen pasar vehículos 
+//Función para que los oficiales dejen pasar vehículos y actualizarlos de ser necesario
 void* letCarsPass(){
     while(total_cars){
         if(current_way == 1) { //Oeste
@@ -65,13 +65,25 @@ void* letCarsPass(){
               pthread_cond_broadcast(&enter_bridge_cond); //Avisar para que vehículos revisen si pueden pasar 
               sleep(1);       
             }
+            if ((!west_officer.k_counter || !west_side.current_cars) && !cars_crossing) { //Si ya no tengo carros esperando ni hay carros cruzando le ceda al otro oficial
+                pthread_mutex_lock(&current_way_mutex);
+                if(east_side.current_cars) current_way = 2; //Si no hay vehículos esperando en el este, que sigan pasando los de mi lado 
+                west_officer.k_counter = west_officer.k; //Restablecer cuenta
+                pthread_mutex_unlock(&current_way_mutex);
+            }
         }   
         if(current_way == 2){ //Este
             while(east_officer.k_counter && east_side.current_cars){ 
               pthread_cond_broadcast(&enter_bridge_cond); //Avisar para que vehículos revisen si pueden pasar 
               sleep(1); 
             }
-        }        
+            if ((!east_officer.k_counter || !east_side.current_cars) && !cars_crossing) { //Si ya no tengo carros esperando ni hay carros cruzando le ceda al otro oficial
+                pthread_mutex_lock(&current_way_mutex);
+                if(west_side.current_cars) current_way = 1; //Se cambia el sentido si hay vehículos esperando del otro lado
+                east_officer.k_counter = east_officer.k; //Restablecer cuenta
+                pthread_mutex_unlock(&current_way_mutex);
+            }
+        }
     }
     pthread_exit(NULL);
 }
@@ -100,27 +112,6 @@ void * changeLight(){
     pthread_exit(NULL);
 }
 
-//Función que se encarga de actualizar valores relacionados a la simulación de los oficiales de tránsito
-void updateOfficer(){
-    //Estado actual: sentido del puente, k_counter y cantidad de carros en lado oeste y este
-    printf("\033[33;1mWAY: %d, \033[36;1m(WKCount: %d, WCurrentCars: %d), \033[35;1m(EKCount: %d, ECurrentCars: %d)\033[0m\n", 
-    current_way, west_officer.k_counter, west_side.current_cars, east_officer.k_counter, east_side.current_cars);
-    //Si ya no hay carros o no se deben dejar pasar más del lado oeste, se cambia el sentido y se reinicia la cuenta
-    if(current_way == 1 && (!west_officer.k_counter || !west_side.current_cars) && !cars_crossing) {
-        pthread_mutex_lock(&current_way_mutex);
-        if(east_side.current_cars) current_way = 2; //Si no hay vehículos esperando en el este, que sigan pasando los de mi lado 
-        west_officer.k_counter = west_officer.k; //Restablecer cuenta
-        pthread_mutex_unlock(&current_way_mutex);
-    }
-    else if(current_way == 2 && (!east_officer.k_counter || !east_side.current_cars) && !cars_crossing) {
-        pthread_mutex_lock(&current_way_mutex);
-        if(west_side.current_cars) current_way = 1; //Se cambia el sentido si hay vehículos esperando del otro lado
-        east_officer.k_counter = east_officer.k; //Restablecer cuenta
-        pthread_mutex_unlock(&current_way_mutex);
-    }
-}
-
-
 //Función para restar en las variables correspondientes porque un vehículo salió del puente
 void carExiting(){
     pthread_mutex_lock(&cars_crossing_mutex);
@@ -131,7 +122,10 @@ void carExiting(){
     if (admin_mode != 2 && cars_crossing == 0) {
         pthread_cond_broadcast(&enter_bridge_cond);
     }
-    if(admin_mode == 3) updateOfficer();
+    //Estado actual: sentido del puente, k_counter y cantidad de carros en lado oeste y este
+    if(admin_mode == 3) printf("\033[33;1mWAY: %d, \033[36;1m(WKCount: %d, WCurrentCars: %d), \033[35;1m(EKCount: %d, ECurrentCars: %d)\033[0m\n\n", 
+    current_way, west_officer.k_counter, west_side.current_cars, east_officer.k_counter, east_side.current_cars);
+    
 }
 
 //Función para aumentar la cantidad de vehículos en el puente
