@@ -7,6 +7,7 @@
 #define MAX_SIZE 100
 
 typedef struct BridgeSide {
+    int way; //1: oeste y 2: este
     pthread_t threads[MAX_SIZE]; //Hilos asociados a los vehículos
     Vehicle vehicles[MAX_SIZE]; //Arreglo de vehiculos
     int max_cars; //Cantidad de vehículos que entran al lado del puente

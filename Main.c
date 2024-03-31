@@ -11,14 +11,14 @@
 
 #define MAX_SIZE 100
 //Constante para calcular el tiempo que dormir cada vehículo
-#define SPEED_CONST 30 
+#define SPEED_CONST 70 
 //Para imprimir si soy ambulancia o carro en terminal
 #define VEHICLE_TYPE (vehicle->priority==1 ? "\033[31;1mAmbulancia\033[0m" : "Carro") 
 //Para imprimir la luz que tiene un semáforo
 #define WEST_SEMAPHORE (west_semaphore.light ? "\033[32;1mVerde\033[0m":"\033[31;1mRojo\033[0m")
 #define EAST_SEMAPHORE (east_semaphore.light ? "\033[32;1mVerde\033[0m":"\033[31;1mRojo\033[0m")
 //Para llamar a la función de entrar al puente que corresponde al modo de administración
-#define ENTER_MODE (admin_mode == 1 ? enterFIFO : (admin_mode == 2 ? enterSemaphore : enterOfficers))
+#define ENTER_MODE (admin_mode == 1 ? enterCarnage : (admin_mode == 2 ? enterSemaphore : enterOfficers))
 
 //Modo de administrar el puente -> 1: FIFO, 2: Semáforos, 3: Oficiales de tránsito
 int admin_mode;
@@ -90,22 +90,28 @@ void* letCarsPass(){
 
 //Función para cambiar las luces de ambos semáforos
 void * changeLight(){
-    double west_sleep_time = west_semaphore.time; 
-    double east_sleep_time = east_semaphore.time; 
-    struct timespec west_delay = {west_sleep_time, 0};
-    struct timespec east_delay = {east_sleep_time, 0};
+    struct timespec west_sleep;
+    west_sleep.tv_sec = (time_t) west_semaphore.time;
+    west_sleep.tv_nsec = (long) ((west_semaphore.time - west_sleep.tv_sec)* 1e9);
+    struct timespec east_sleep;
+    east_sleep.tv_sec = (time_t) east_semaphore.time;
+    east_sleep.tv_nsec = (long) ((east_semaphore.time - east_sleep.tv_sec)* 1e9);
     //Se usa la cantidad de carros totales de la simulación para poder determinar hasta cuando se paran los semáforos
     while(total_cars){  
         printf("Luz de semáforo oeste es %s\n",WEST_SEMAPHORE);
         printf("Luz de semáforo este es %s\n",EAST_SEMAPHORE);
-        pthread_cond_broadcast(&enter_bridge_cond); //Avisa al resto de los hilos que pueden pasar el puente
-        nanosleep(&west_delay, NULL); //Se duerme el hilo 
+        pthread_cond_broadcast(&enter_bridge_cond); //Avisar a los hilos que revisen si pueden pasar el puente
+        //Dormir
+        if(west_semaphore.light) nanosleep(&west_sleep, NULL);
+        else nanosleep(&east_sleep, NULL);
         west_semaphore.light=!west_semaphore.light;
         east_semaphore.light=!east_semaphore.light;
         printf("Luz de semáforo oeste es %s\n",WEST_SEMAPHORE);
         printf("Luz de semáforo este es %s\n",EAST_SEMAPHORE);
         pthread_cond_broadcast(&enter_bridge_cond);
-        nanosleep(&east_delay, NULL);
+        //Dormir
+        if(west_semaphore.light) nanosleep(&west_sleep, NULL);
+        else nanosleep(&east_sleep, NULL);
         west_semaphore.light=!west_semaphore.light;
         east_semaphore.light=!east_semaphore.light;
     }
@@ -153,13 +159,14 @@ void addCarsCrossing(int way){
 void* travelEastToWest(void* arg){
     Vehicle* vehicle = (Vehicle*)arg;
     double sleep_time = SPEED_CONST/(vehicle->speed);
-    struct timespec delay = {sleep_time, 0};
-    int i;
+    struct timespec sleep;
+    sleep.tv_sec = (time_t) sleep_time; //Parte entera
+    sleep.tv_nsec = (long) ((sleep_time - sleep.tv_sec) * 1e9); //Decimales en nanosegundos
     pthread_mutex_lock(&bridge[bridgeLength-1]); //Hace lock de la primera posición de este a oeste (la última)
     printf("\033[35;1m<-\033[0m %s %ld entró al puente \n", VEHICLE_TYPE,pthread_self());
-    for(i = bridgeLength-2; i >= 0; i--){
+    for(int i = bridgeLength-2; i >= 0; i--){
         printf("\033[35;1m<-\033[0m %s %ld está cruzando sección %d \n", VEHICLE_TYPE,pthread_self(), i+1); //La posición de la que ya tiene el lock
-        nanosleep(&delay, NULL);
+        nanosleep(&sleep, NULL);
         pthread_mutex_lock(&bridge[i]); //i es la siguiente posición
         pthread_mutex_unlock(&bridge[i+1]); //Hasta que se tiene la siguiente posición se libera la anterior
     }
@@ -174,13 +181,14 @@ void* travelEastToWest(void* arg){
 void* travelWestToEast(void* arg){
     Vehicle* vehicle = (Vehicle*)arg;
     double sleep_time = SPEED_CONST/(vehicle->speed);
-    struct timespec delay = {sleep_time, 0};
-    int i;
+    struct timespec sleep;
+    sleep.tv_sec = (time_t) sleep_time; //Parte entera
+    sleep.tv_nsec = (long) ((sleep_time - sleep.tv_sec) * 1e9); //Decimales en nanosegundos
     pthread_mutex_lock(&bridge[0]); //Hace lock de la primera posición de oeste a este 
     printf("\033[36;1m->\033[0m %s %ld entró al puente \n",VEHICLE_TYPE ,pthread_self());
-    for(i = 1; i < bridgeLength; i++){
+    for(int i = 1; i < bridgeLength; i++){
         printf("\033[36;1m->\033[0m %s %ld está cruzando sección %d \n",VEHICLE_TYPE ,pthread_self(), i-1); //Posición de la que se tiene lock actualmente
-        nanosleep(&delay, NULL);
+        nanosleep(&sleep, NULL);
         pthread_mutex_lock(&bridge[i]); //Se intenta hacer lock de la siguiente posición
         pthread_mutex_unlock(&bridge[i-1]); //Se libera la anterior
     }
@@ -254,7 +262,7 @@ void* enterSemaphore(void* arg) {
 }
 
 //Función para determinar que un vehículo entre al puente en el modo FIFO
-void* enterFIFO(void* arg) {
+void* enterCarnage(void* arg) {
     Vehicle* vehicle = (Vehicle*) arg;
     int ambulance_is_waiting = 0; //Variable para determinar si hay una ambulancia esperando en cualquier lado
     pthread_mutex_lock(&enter_bridge_mutex); //Bloquear el acceso a la variable de condición para entrar al puente
@@ -284,15 +292,15 @@ void* enterFIFO(void* arg) {
 
 
 //Dormir entre la creación de los vehículos según la media de la distribución exponencial dada
-void* creationSleep(void* mean) {
-    double exp_mean = *((double*) mean); 
+void* creationSleep(double exp_mean) {
     double r = (double) rand() / RAND_MAX; //r debe estar en el intervalo [0, 1[
     double sleep_time = -exp_mean * log(1-r); //Tiempo entre creación de vehículos
-    struct timespec delay = {sleep_time, 0};
-    nanosleep(&delay, NULL); //nanosleep es más preciso que sleep
+    struct timespec sleep;
+    sleep.tv_sec = (time_t) sleep_time; //Parte entera
+    sleep.tv_nsec = (long) ((sleep_time - sleep.tv_sec) * 1e9); //Nanosegundos
+    nanosleep(&sleep, NULL); //Dormir
     return NULL;
 }
-
 //Retorna 2 si el vehículo es carro y 1 si es ambulancia
 int generatePriority() {
     int random_number = rand() % 100; //Generar un número random entre 0 y 99
@@ -319,48 +327,25 @@ double generateSpeed(int i, BridgeSide* side) {
     return random_speed;
 }
 
-//Creación de los vehículos en el lado este
-void* createEastVehicles(void* size) {
-    int east_max_cars = *((int*) size);
-    double total_speed = east_max_cars * east_side.speed_mean; //Suma de las velocidades para tener la media indicada
-    int i;
-    // Inicializar los vehículos y crear los hilos
-    for (i = 0; i < east_max_cars; i++) {   
-        east_side.vehicles[i].way = 2;
-        east_side.vehicles[i].priority = generatePriority();
-        east_side.vehicles[i].speed = generateSpeed(i, &east_side);
-        pthread_create(&east_side.threads[i], NULL, ENTER_MODE, &east_side.vehicles[i]);
-        pthread_mutex_lock(&east_side.current_cars_mutex);
-        east_side.current_cars++;
-        pthread_mutex_unlock(&east_side.current_cars_mutex);
-        //Tiempo de espera
-        creationSleep(&east_side.exp_mean);
-    }
-    for (i = 0; i < east_max_cars; i++) {
-        pthread_join(east_side.threads[i], NULL);
-    }
-    return NULL;
-}
 
-
-//Creación de los vehículos en el lado oeste
-void* createWestVehicles(void* size) {
-    int west_max_cars = *((int*) size);
-    int i;
+//Creación de los vehículos 
+void* createVehicles(void* sidePtr) {
+    BridgeSide* side = (BridgeSide*) sidePtr;
+    int side_max_cars = side->max_cars;
     // Inicializar los vehículos y crear los hilos
-    for (i = 0; i < west_max_cars; i++) {   
-        west_side.vehicles[i].way = 1;
-        west_side.vehicles[i].priority = generatePriority();
-        west_side.vehicles[i].speed = generateSpeed(i, &west_side);
-        pthread_create(&west_side.threads[i], NULL, ENTER_MODE, &west_side.vehicles[i]);
-        pthread_mutex_lock(&west_side.current_cars_mutex);
-        west_side.current_cars++;
-        pthread_mutex_unlock(&west_side.current_cars_mutex);
+    for (int i = 0; i < side_max_cars; i++) {   
         //Tiempo de espera
-        creationSleep(&west_side.exp_mean);
+        creationSleep(side->exp_mean);
+        side->vehicles[i].way = side->way;
+        side->vehicles[i].priority = generatePriority();
+        side->vehicles[i].speed = generateSpeed(i, side);
+        pthread_create(&side->threads[i], NULL, ENTER_MODE, &side->vehicles[i]);
+        pthread_mutex_lock(&side->current_cars_mutex);
+        side->current_cars++;
+        pthread_mutex_unlock(&side->current_cars_mutex);
     }
-    for (i = 0; i < west_max_cars; i++) {
-        pthread_join(west_side.threads[i], NULL);
+    for (int i = 0; i < side_max_cars; i++) {
+        pthread_join(side->threads[i], NULL);
     }
     return NULL;
 }
@@ -410,6 +395,7 @@ void readAndSetParameters() {
     //Lado oeste del puente
     double west_exp_mean, west_min_speed, west_max_speed, west_speed_mean;
     scanf("%d %lf %lf %lf %lf", &west_max_cars, &west_exp_mean, &west_min_speed, &west_max_speed, &west_speed_mean);
+    west_side.way = 1;
     west_side.max_cars = west_max_cars;
     west_side.exp_mean = west_exp_mean;
     west_side.min_speed = west_min_speed;
@@ -420,6 +406,7 @@ void readAndSetParameters() {
     //Lado este
     double east_exp_mean, east_min_speed, east_max_speed, east_speed_mean;
     scanf("%d %lf %lf %lf %lf", &east_max_cars, &east_exp_mean, &east_min_speed, &east_max_speed, &east_speed_mean);
+    east_side.way = 2;
     east_side.max_cars = east_max_cars;
     east_side.exp_mean = east_exp_mean;
     east_side.speed_mean = east_speed_mean;
@@ -448,8 +435,8 @@ int main() {
     pthread_t officers;
     if(admin_mode == 2) pthread_create(&semaphores, NULL, changeLight, NULL);
     if(admin_mode == 3) pthread_create(&officers, NULL, letCarsPass, NULL);
-    pthread_create(&generate_west, NULL, createWestVehicles, &west_max_cars);
-    pthread_create(&generate_east, NULL, createEastVehicles, &east_max_cars);
+    pthread_create(&generate_west, NULL, createVehicles, &west_side);
+    pthread_create(&generate_east, NULL, createVehicles, &east_side);
     pthread_join(generate_west, NULL);
     pthread_join(generate_east, NULL);
     if(admin_mode == 2) pthread_join(semaphores,NULL);
