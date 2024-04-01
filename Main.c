@@ -98,20 +98,28 @@ void * changeLight(){
     east_sleep.tv_nsec = (long) ((east_semaphore.time - east_sleep.tv_sec)* 1e9);
     //Se usa la cantidad de carros totales de la simulación para poder determinar hasta cuando se paran los semáforos
     while(total_cars){  
+        //Estado actual: sentido del puente, k_counter y cantidad de carros en lado oeste y este
+        printf("\n\033[36;1mVehículos esperando en oeste: %d, \033[35;1mVehículos esperando en este: %d\033[0m\n", 
+        west_side.current_cars, east_side.current_cars);
         printf("Luz de semáforo oeste es %s\n",WEST_SEMAPHORE);
         printf("Luz de semáforo este es %s\n",EAST_SEMAPHORE);
         pthread_cond_broadcast(&enter_bridge_cond); //Avisar a los hilos que revisen si pueden pasar el puente
         //Dormir
         if(west_semaphore.light) nanosleep(&west_sleep, NULL);
         else nanosleep(&east_sleep, NULL);
-        west_semaphore.light=!west_semaphore.light;
+        //Cambio de luces de ambos semaforos
+        west_semaphore.light=!west_semaphore.light; 
         east_semaphore.light=!east_semaphore.light;
+        //Estado actual: sentido del puente, k_counter y cantidad de carros en lado oeste y este
+        printf("\n\033[36;1mVehículos esperando en oeste: %d, \033[35;1mVehículos esperando en este: %d\033[0m\n", 
+        west_side.current_cars, east_side.current_cars);
         printf("Luz de semáforo oeste es %s\n",WEST_SEMAPHORE);
         printf("Luz de semáforo este es %s\n",EAST_SEMAPHORE);
         pthread_cond_broadcast(&enter_bridge_cond);
         //Dormir
         if(west_semaphore.light) nanosleep(&west_sleep, NULL);
         else nanosleep(&east_sleep, NULL);
+        //Cambio de luces de ambos semaforos
         west_semaphore.light=!west_semaphore.light;
         east_semaphore.light=!east_semaphore.light;
     }
